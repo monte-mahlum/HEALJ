@@ -1,0 +1,6 @@
+numpy<2
+scipy
+biopython
+torch
+fair-esm
+h5py

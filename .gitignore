@@ -1,0 +1,25 @@
+# Python envs
+.venv/
+preprocess/.venv/
+
+# ESM weights (>7gb)
+preprocess/esm_weights/
+
+# Generated / downloaded data
+preprocess/data/processed/
+preprocess/data/structures/
+data/processed/
+data/structures/
+
+#
+model/
+
+
+*.h5
+*.pt
+*.pdb
+
+# OS junk
+.DS_Store
+
+
