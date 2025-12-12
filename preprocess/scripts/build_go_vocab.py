@@ -1,6 +1,13 @@
 import argparse, re, json
 from pathlib import Path
 
+"""
+To run (once .venv is activated):
+python preprocess/scripts/build_go_vocab.py \
+  --annot_tsv preprocess/data/raw/nrPDB-GO_2019.06.18_annot.tsv \
+  --out_json preprocess/data/processed/go_vocab_train.json
+"""
+
 def read_fasta_ids(fasta_path: Path):
     ids = []
     for line in fasta_path.read_text().splitlines():
@@ -29,7 +36,7 @@ def main():
     train_ids = read_fasta_ids(Path(args.train_fasta))
     ann_map = load_annotations(Path(args.annot_tsv))
 
-    # Build vocab ONLY from training ids
+    # Build vocab only from training ids
     go_terms = []
     seen = set()
     for pid in train_ids:

@@ -5,56 +5,53 @@ using NNlib
 export MLPHead
 
 """
-MLPHead: simple MLP classifier head on top of HGT graph embeddings.
+    MLPHead(layer_dims)
 
-Input:
-  Z :: B×D    (batch of B graph embeddings, dim D)
+Simple MLP classifier head on top of graph embeddings.
 
-Output:
-  Ŷ :: B×C    (batch of logits for C labels)
+- Input:  Z :: B×D_in   (graph embeddings)
+- Output: Ŷ :: B×D_out (logits)
+
+`layer_dims` is a vector of layer widths, including input and output.
+For example:
+
+    MLPHead([D, 512, C])
+
+creates a 2-layer MLP with hidden size 512 and output size C.
 """
 struct MLPHead
-    layers::Vector{Dense}   # each is Din -> Dout
+    layers :: Vector{Dense}
 end
 
-Flux.@layer MLPHead trainable = (layers,)
+_dense_rows_mlp(d::Dense, X::AbstractMatrix) =
+    permutedims(d(permutedims(X)))
 
+# Constructor
+function MLPHead(layer_dims::AbstractVector{<:Integer})
+    @assert length(layer_dims) ≥ 2 "layer_dims must include input and output size"
 
-function MLPHead(
-    in_dim::Int,
-    hidden_dims::AbstractVector{<:Int},
-    out_dim::Int;
-    activation = NNlib.relu,
-)
-    dims = Int[in_dim; hidden_dims...; out_dim]
-    L = length(dims) - 1
-
-    dense_layers = Vector{Dense}(undef, L)
-    for i in 1:L
-        Din = dims[i]
-        Dout = dims[i+1]
-        σ = (i == L) ? identity : activation   # last layer: no activation (logits)
-        dense_layers[i] = Dense(Din, Dout, σ)
+    dense_layers = Dense[]
+    for i in 1:(length(layer_dims) - 1)
+        in_dim  = layer_dims[i]
+        out_dim = layer_dims[i+1]
+        σ = i == length(layer_dims) - 1 ? identity : NNlib.relu
+        push!(dense_layers, Dense(in_dim, out_dim, σ))
     end
-
     return MLPHead(dense_layers)
 end
 
-# Julia's Dense layers do things in a transposed manner, so we fix it here.
-_dense_rows(d::Dense, X::AbstractMatrix{Float32}) =
-    permutedims(d(permutedims(X)))
+MLPHead(dims::Tuple{Vararg{Int}}) = MLPHead(collect(dims))
 
-"""
-Forward pass:
+# Better Constructor
+function MLPHead(in_dim::Integer, hidden::AbstractVector{<:Integer}, out_dim::Integer)
+    return MLPHead(vcat(in_dim, hidden, out_dim))
+end
 
-Z :: B×D (Float32) → Ŷ :: B×C (Float32)
-
-Rows are independent, so we apply each Dense row-wise using _dense_rows from HGT.
-"""
-function (m::MLPHead)(Z::AbstractMatrix{Float32})
+# Forward pass
+function (m::MLPHead)(Z::AbstractMatrix)
     X = Z
     for l in m.layers
-        X = _dense_rows(l, X)
+        X = _dense_rows_mlp(l, X)
     end
-    return X   # B×C logits
+    return X
 end

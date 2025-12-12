@@ -7,19 +7,25 @@ preprocess/esm_weights/
 
 # Generated / downloaded data
 preprocess/data/processed/
-preprocess/data/structures/
-data/processed/
-data/structures/
+data/
 
-#
-model/
+# Model parameters
+artifacts/*
+
+!artifacts/
+!artifacts/run_20251211_134513/
+!artifacts/test_results_20251211_153949/
+!artifacts/run_20251211_134513/history_20251211_134513.csv
+!artifacts/test_results_20251211_153949/raw_results_20251211_153949_analysis.csv
+
 
 
 *.h5
 *.pt
 *.pdb
 
-# OS junk
+# OS
 .DS_Store
+Thumbs.db
 
 

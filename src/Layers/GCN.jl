@@ -2,103 +2,205 @@ using LinearAlgebra
 using Random
 using Flux
 using NNlib
+using SparseArrays
+using Zygote
+using CUDA
 
 export GCNLayer, GCNEncoder, gcn_forward, perturb_nodes
 
+
+"""
+    GCNLayer(in_dim, out_dim; σ = relu, bias = false)
+
+One Kipf–Welling style GCN layer.
+
+Given node features `H :: N×Fin` and an (undirected) graph with edges
+`src, dst` (1-based indices), it computes
+
+    H′ = σ( Â * H * W )
+
+where Â is the fixed normalized adjacency matrix and W are the layer
+weights from a `Dense` layer.
+"""
 struct GCNLayer
-    W::Dense
-    σ::Function
+    lin :: Dense
+    σ   :: Function
 end
 
-Flux.@layer GCNLayer trainable=(W,)
+GCNLayer(in_dim::Integer, out_dim::Integer;
+         σ::Function = NNlib.relu,
+         bias::Bool = false) =
+    GCNLayer(Dense(in_dim, out_dim; bias = bias), σ)
 
-GCNLayer(in_dim::Integer, out_dim::Integer; σ = NNlib.relu, bias::Bool = false) =
-    GCNLayer(Dense(in_dim, out_dim; bias=bias), σ)
+# Apply Dense row-wise: H :: N×Fin  ->  N×Fout
+_dense_rows(d::Dense, H::AbstractMatrix) =
+    permutedims(d(permutedims(H)))
 
-# H: N×F_in → Dense expects F_in×N
-_linear(d::Dense, H::AbstractMatrix) =
-    permutedims(d(permutedims(Float32.(H))))
 
-function gcn_forward(
-    Z::AbstractMatrix{<:Real},
+"""
+    build_norm_adj(src, dst, N) -> Â::Matrix{Float32}
+
+Build symmetric normalized adjacency
+
+    Â = D^{-1/2} (A + I) D^{-1/2}
+
+for a graph with `N` nodes and edge list `(src, dst)` (1-based).
+
+- `src`, `dst` can be any integer vectors (CPU or GPU); they are copied
+  to CPU internally.
+- Returns a dense `Matrix{Float32}`.
+"""
+function build_norm_adj(
     src::AbstractVector{<:Integer},
     dst::AbstractVector{<:Integer},
+    N::Integer,
 )
-    N, F = size(Z)
-    E = length(src)
+    # Ensure CPU 32-bit indices
+    src_cpu = Int32.(collect(src))
+    dst_cpu = Int32.(collect(dst))
 
-    # Add self loops:
-    # ---------
-    all_src = Vector{Int32}(undef, E + N)
-    all_dst = Vector{Int32}(undef, E + N)
+    E = length(src_cpu)
+    nentries = 2E + N
 
+    I = Vector{Int32}(undef, nentries)
+    J = Vector{Int32}(undef, nentries)
+    V = Vector{Float32}(undef, nentries)
+
+    k = 1
     @inbounds for e in 1:E
-        all_src[e] = Int32(src[e])
-        all_dst[e] = Int32(dst[e])
+        i = src_cpu[e]
+        j = dst_cpu[e]
+        I[k] = i; J[k] = j; V[k] = 1.0f0; k += 1
+        I[k] = j; J[k] = i; V[k] = 1.0f0; k += 1
     end
-    @inbounds for i in 1:N
-        all_src[E + i] = Int32(i)
-        all_dst[E + i] = Int32(i)
-    end
-    # ---------
 
-    # 
-    deg = zeros(Float32, N)
-    @inbounds for d in all_dst
-        deg[d] += 1f0
+    # Self-loops
+    @inbounds for n in 1:Int32(N)
+        I[k] = n; J[k] = n; V[k] = 1.0f0; k += 1
     end
-    invsqrt = 1f0 ./ sqrt.(deg .+ 1f-8)
 
-    out = zeros(Float32, N, F)
-    @inbounds for e in eachindex(all_src)
-        s = Int(all_src[e])
-        d = Int(all_dst[e])
-        c = invsqrt[d] * invsqrt[s]
-        out[d, :] .+= c .* Float32.(Z[s, :])
+    A = sparse(I, J, V, N, N)
+
+    # Degree vector
+    d = vec(sum(A, dims = 2))            
+
+    invsqrtd = similar(d, Float32)
+    @inbounds for i in eachindex(d)
+        v = d[i]
+        invsqrtd[i] = v > 0 ? inv(sqrt(Float32(v))) : 0.0f0
     end
-    return out
+
+    Dinv = spdiagm(0 => invsqrtd)
+    Ahat = Dinv * A * Dinv                    
+
+    # Dense CPU matrix
+    return Array{Float32}(Ahat)
 end
 
-function (l::GCNLayer)(
-    H::AbstractMatrix{<:Real},
+# Graph structure is fixed, so cannot backprop through it
+Zygote.@nograd build_norm_adj
+
+"""
+    gcn_forward(H, src, dst) -> Hprop
+
+Apply fixed normalized adjacency to node features `H`.
+
+- `H`   :: N×F (CPU or GPU)
+- `src`, `dst` :: edge lists for the graph
+
+The result lives on the **same device** as `H` (if CUDA is available).
+"""
+function gcn_forward(
+    H::AbstractMatrix,
     src::AbstractVector{<:Integer},
     dst::AbstractVector{<:Integer},
 )
-    Z = _linear(l.W, H)          # N×F_out
-    P = gcn_forward(Z, src, dst)
-    return l.σ.(P)
+    N = size(H, 1)
+    Ahat_cpu = build_norm_adj(src, dst, N)
+
+    if CUDA.has_cuda()
+        Hgpu     = cu(H)
+        Ahat_gpu = cu(Ahat_cpu)
+        return Ahat_gpu * Hgpu
+    else
+        # Pure CPU path
+        return Ahat_cpu * H
+    end
 end
 
+
+# One GCN layer: H -> σ(Â H W)
+function (layer::GCNLayer)(
+    H::AbstractMatrix,
+    src::AbstractVector{<:Integer},
+    dst::AbstractVector{<:Integer},
+)
+    Z = gcn_forward(H, src, dst)           # N×Fin
+    return layer.σ(_dense_rows(layer.lin, Z))
+end
+
+"""
+    GCNEncoder(dims; σ = relu, bias = false)
+
+Stack of GCN layers with widths given by `dims`.
+
+Example:
+    enc = GCNEncoder([F, D, D])
+    Henc = enc(H0, src, dst)
+"""
 struct GCNEncoder
-    layers::Vector{GCNLayer}
+    layers :: Vector{GCNLayer}
 end
 
-Flux.@layer GCNEncoder trainable=(layers,)
+function GCNEncoder(
+    dims::AbstractVector{<:Integer};
+    σ::Function = NNlib.relu,
+    bias::Bool = false,
+)
+    @assert length(dims) ≥ 2 "dims must have at least input and output size"
+    layers = GCNLayer[]
+    for i in 1:(length(dims) - 1)
+        push!(layers, GCNLayer(dims[i], dims[i+1]; σ = σ, bias = bias))
+    end
+    return GCNEncoder(layers)
+end
 
-GCNEncoder(dims::AbstractVector{<:Integer}; σ = NNlib.relu) =
-    GCNEncoder([GCNLayer(dims[i], dims[i+1]; σ=σ) for i in 1:length(dims)-1])
+GCNEncoder(dims::Tuple{Vararg{Int}}; σ::Function = NNlib.relu, bias::Bool = false) =
+    GCNEncoder(collect(dims); σ = σ, bias = bias)
 
 function (enc::GCNEncoder)(
-    H::AbstractMatrix{<:Real},
+    H::AbstractMatrix,
     src::AbstractVector{<:Integer},
     dst::AbstractVector{<:Integer},
 )
-    X = H
-    for l in enc.layers
-        X = l(X, src, dst)
+    Z = H
+    for layer in enc.layers
+        Z = layer(Z, src, dst)
     end
-    return X
+    return Z
 end
 
-# For contrastive learning
+"""
+    perturb_nodes(H; ε = 0.1f0, rng = Random.default_rng())
+
+Add small adversarial-style perturbations along the sign direction
+of the features:
+
+    H̃ = H + ε * (V / ‖V‖₂) .* sign(H)
+
+This function is intended to be used on **CPU** feature matrices `H`
+coming from the data loader, before moving batches to GPU.
+Works on any AbstractMatrix without mutation.
+"""
 function perturb_nodes(
-    H::AbstractMatrix{<:Real};
+    H::AbstractMatrix;
     ε::Float32 = 0.1f0,
     rng::AbstractRNG = Random.default_rng(),
 )
-    X = Float32.(H)
-    V = randn(rng, Float32, size(X))
-    norms = sqrt.(sum(V .* V; dims=2)) .+ 1f-8
-    V ./= norms
-    return X .+ ε .* (V .* sign.(X))
+    T = eltype(H)
+    X = H
+    V = randn(rng, T, size(X))                     # CPU noise
+    norms = sqrt.(sum(V .* V; dims = 2)) .+ T(1e-8)
+    Vnorm = V ./ norms
+    return X .+ ε .* (Vnorm .* sign.(X))
 end

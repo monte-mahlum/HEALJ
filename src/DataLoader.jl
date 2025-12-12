@@ -269,7 +269,7 @@ function load_graph(ref::GraphRef, ds::Dataset; use_native::Bool=true, use_esm::
             for r in required
                 haskey(g, r) || throw(ArgumentError("Graph $(ref.key) missing dataset '$r' in $(ref.path)"))
             end
-
+            
             # Edge list
             e_raw = read(g["edge_index"])
             s_view, d_view = edge_to_srcdst(e_raw)
@@ -329,7 +329,7 @@ end
 
 
 
-# ---------------- Microbatch builder (disjoint union) ----------------
+# ---------------- Microbatch builder (disjoint union of graphs) ----------------
 
 """
 Build one microbatch by disjoint union batching:
@@ -444,5 +444,5 @@ function make_batch_plan(
 end
 
 
-end # module
+end # module DataLoader
 

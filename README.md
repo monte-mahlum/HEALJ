@@ -1,28 +1,59 @@
+# HEALJ
 
-Python Preprocessing (ESM + graph shard builder)
+Julia reimplementation of the HEAL model for protein function prediction on the nrPDB-GO dataset.
 
-Repo tree (Python lives under `preprocess/`)
-- Python venv: `preprocess/.venv/`
-- Python scripts: `preprocess/scripts/`
-- ESM weights: `preprocess/esm_weights/`
-- Raw inputs: `preprocess/data/raw/`
-- Cached PDBs: `preprocess/data/structures/pdb/`
-- Outputs (HDF5 shards): `preprocess/data/processed/shards/{train,validate,test}/`
+This README documents how to reproduce the preprocessing and training pipeline.
 
 ---
 
-1) Create + activate the Python venv (inside preprocess)
-```bash
-cd /Users/montemahlum/HEALJ
+## 1. Repository layout
+
+- Python (preprocessing) lives under `preprocess/`
+- Julia code lives at the repo root
+
+Key paths:
+
+- `preprocess/.venv/` – Python virtual environment  
+- `preprocess/scripts/` – preprocessing scripts  
+- `preprocess/esm_weights/` – ESM-1b weights  
+- `preprocess/data/raw/` – raw FASTA + annotations  
+- `preprocess/data/processed/all_shards/` – HDF5 graph shards  
+- `artifacts/` – training and test outputs (mostly gitignored)
+
+---
+
+## 2. Python preprocessing
+
+All commands assume you are in the repo root.
+
+### 2.1. Create and activate Python venv
+
+**Windows (PowerShell)**
+
+```powershell
+cd C:\RDI\HEALJ
+
+python -m venv preprocess\.venv
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\preprocess\.venv\Scripts\Activate.ps1
+
+pip install -U pip
+pip install "numpy<2" scipy biopython torch fair-esm h5py
+macOS / Linux
+
+bash
+Copy code
+cd HEALJ
 
 python3 -m venv preprocess/.venv
 source preprocess/.venv/bin/activate
+
 pip install -U pip
 pip install "numpy<2" scipy biopython torch fair-esm h5py
-2) Download ESM-1b weights (local only)
+2.2. Download ESM-1b weights
 bash
 Copy code
-cd /Users/montemahlum/HEALJ
+cd HEALJ
 mkdir -p preprocess/esm_weights
 
 curl -L -o preprocess/esm_weights/esm1b_t33_650M_UR50S.pt \
@@ -30,96 +61,123 @@ curl -L -o preprocess/esm_weights/esm1b_t33_650M_UR50S.pt \
 
 curl -L -o preprocess/esm_weights/esm1b_t33_650M_UR50S-contact-regression.pt \
   https://dl.fbaipublicfiles.com/fair-esm/regression/esm1b_t33_650M_UR50S-contact-regression.pt
+2.3. Expected raw data
+Place the following under preprocess/data/raw/:
 
-ls -lh preprocess/esm_weights
-3) Data files (what’s what)
-PDBch dataset (PDB-based)
-preprocess/data/raw/nrPDB-GO_2019.06.18_sequences.fasta — full FASTA snapshot
+nrPDB-GO_2019.06.18_sequences.fasta
 
-preprocess/data/raw/nrPDB-GO_2019.06.18_annot.tsv — protein → GO term labels
+nrPDB-GO_2019.06.18_annot.tsv
 
-preprocess/data/raw/nrPDB-GO_2019.06.18_train_sequences.fasta — train split
+nrPDB-GO_2019.06.18_train_sequences.fasta
 
-preprocess/data/raw/nrPDB-GO_2019.06.18_val_sequences.fasta — val split
+nrPDB-GO_2019.06.18_val_sequences.fasta
 
-preprocess/data/raw/nrPDB-GO_2019.06.18_test_sequences.fasta — test split
+nrPDB-GO_2019.06.18_test_sequences.fasta
 
-preprocess/data/raw/nrPDB-GO_2019.06.18_test.csv — test metadata (IDs/labels in CSV form)
-
-AFch dataset (AlphaFold / AF-model-based)
-preprocess/data/raw/nrAF-Model-GO_train_sequences.fasta, ..._val_..., ..._test_... — AF-model train/val/test splits
-
-preprocess/data/raw/nrAF_PDB_train_sequences.fasta — AF/PDB-linked training subset
-
-Swiss-Model dataset
-preprocess/data/raw/nrSwiss-Model-GO_sequences.fasta — Swiss-Model sequences
-
-preprocess/data/raw/nrSwiss-Model-GO_annot.tsv — Swiss-Model protein → GO labels
-
-4) Build go_vocab_train.json (if you need to recreate it)
+2.4. Build GO vocabulary
 bash
 Copy code
-cd /Users/montemahlum/HEALJ
-source preprocess/.venv/bin/activate
+cd HEALJ
+source preprocess/.venv/bin/activate  # or the Windows activation above
 
 python preprocess/scripts/build_go_vocab.py \
   --annot_tsv preprocess/data/raw/nrPDB-GO_2019.06.18_annot.tsv \
-  --out_json preprocess/data/processed/go_vocab_train.json
-5) Generate sample HDF5 shards (train/validate/test)
-These commands:
+  --out_json  preprocess/data/processed/go_vocab_train.json
+2.5. Build HDF5 shards
+Train
 
-read .fasta split IDs
+powershell
+Copy code
+python preprocess\scripts\build_split_shards.py `
+  --split_fasta   preprocess/data/raw/nrPDB-GO_2019.06.18_train_sequences.fasta `
+  --annot_tsv     preprocess/data/raw/nrPDB-GO_2019.06.18_annot.tsv `
+  --esm_weights   preprocess/esm_weights/esm1b_t33_650M_UR50S.pt `
+  --go_vocab_json preprocess/data/processed/go_vocab_train.json `
+  --out_dir       preprocess/data/processed/all_shards/train `
+  --prefix        train `
+  --shard_size    256 `
+  --max_items     30000
+Validation
 
-map IDs → GO labels using the TSV
+powershell
+Copy code
+python preprocess\scripts\build_split_shards.py `
+  --split_fasta   preprocess/data/raw/nrPDB-GO_2019.06.18_val_sequences.fasta `
+  --annot_tsv     preprocess/data/raw/nrPDB-GO_2019.06.18_annot.tsv `
+  --esm_weights   preprocess/esm_weights/esm1b_t33_650M_UR50S.pt `
+  --go_vocab_json preprocess/data/processed/go_vocab_train.json `
+  --out_dir       preprocess/data/processed/all_shards/validate `
+  --prefix        val `
+  --shard_size    256 `
+  --max_items     3400
+Test
 
-download/cache PDB structures under preprocess/data/structures/pdb/
+powershell
+Copy code
+python preprocess\scripts\build_split_shards.py `
+  --split_fasta   preprocess/data/raw/nrPDB-GO_2019.06.18_test_sequences.fasta `
+  --annot_tsv     preprocess/data/raw/nrPDB-GO_2019.06.18_annot.tsv `
+  --esm_weights   preprocess/esm_weights/esm1b_t33_650M_UR50S.pt `
+  --go_vocab_json preprocess/data/processed/go_vocab_train.json `
+  --out_dir       preprocess/data/processed/all_shards/test `
+  --prefix        test `
+  --shard_size    256 `
+  --max_items     3500
+At this point, HDF5 shards exist under:
 
-compute ESM-1b per-residue embeddings
+preprocess/data/processed/all_shards/train/
 
-write .h5 shard files into preprocess/data/processed/shards/...
+preprocess/data/processed/all_shards/validate/
 
-Train shards (sample)
+preprocess/data/processed/all_shards/test/
+
+3. Julia / HEALJ
+3.1. Instantiate the environment
 bash
 Copy code
-cd /Users/montemahlum/HEALJ
-source preprocess/.venv/bin/activate
-
-python preprocess/scripts/build_split_shards.py \
-  --split_fasta preprocess/data/raw/nrPDB-GO_2019.06.18_train_sequences.fasta \
-  --annot_tsv preprocess/data/raw/nrPDB-GO_2019.06.18_annot.tsv \
-  --esm_weights preprocess/esm_weights/esm1b_t33_650M_UR50S.pt \
-  --go_vocab_json preprocess/data/processed/go_vocab_train.json \
-  --out_dir preprocess/data/processed/shards/train \
-  --prefix train \
-  --shard_size 256 \
-  --max_items 1000
-Validate shards (sample)
+cd HEALJ
+julia --project=. -e 'using Pkg; Pkg.instantiate()'
+3.2. Optional: dataset smoke test
 bash
 Copy code
-cd /Users/montemahlum/HEALJ
-source preprocess/.venv/bin/activate
+julia --project=. scripts/avg_graph_stats.jl
+(Or any other smoke script that calls HEALJ.DataLoader.make_datasets().)
 
-python preprocess/scripts/build_split_shards.py \
-  --split_fasta preprocess/data/raw/nrPDB-GO_2019.06.18_val_sequences.fasta \
-  --annot_tsv preprocess/data/raw/nrPDB-GO_2019.06.18_annot.tsv \
-  --esm_weights preprocess/esm_weights/esm1b_t33_650M_UR50S.pt \
-  --go_vocab_json preprocess/data/processed/go_vocab_train.json \
-  --out_dir preprocess/data/processed/shards/validate \
-  --prefix val \
-  --shard_size 256 \
-  --max_items 250
-Test shards (sample)
+3.3. Training
+Example:
+
 bash
 Copy code
-cd /Users/montemahlum/HEALJ
-source preprocess/.venv/bin/activate
+julia --project=. scripts/train.jl
+Outputs go under:
 
-python preprocess/scripts/build_split_shards.py \
-  --split_fasta preprocess/data/raw/nrPDB-GO_2019.06.18_test_sequences.fasta \
-  --annot_tsv preprocess/data/raw/nrPDB-GO_2019.06.18_annot.tsv \
-  --esm_weights preprocess/esm_weights/esm1b_t33_650M_UR50S.pt \
-  --go_vocab_json preprocess/data/processed/go_vocab_train.json \
-  --out_dir preprocess/data/processed/shards/test \
-  --prefix test \
-  --shard_size 256 \
-  --max_items 250
+artifacts/run_YYYYMMDD_HHMMSS/
+
+e.g.:
+
+artifacts/run_20251211_134513/history_20251211_134513.csv
+
+artifacts/run_20251211_134513/model_20251211_134513.jls
+
+3.4. Testing and analysis
+Run test:
+
+bash
+Copy code
+julia --project=. analysis/test.jl
+This writes raw test results to:
+
+artifacts/test_results_YYYYMMDD_HHMMSS/raw_results_YYYYMMDD_HHMMSS.jls
+
+Convert to per-protein metrics:
+
+bash
+Copy code
+julia --project=. analysis/analyze_test_results.jl \
+  artifacts/test_results_YYYYMMDD_HHMMSS/raw_results_YYYYMMDD_HHMMSS.jls
+Compute final aggregate metrics:
+
+bash
+Copy code
+julia --project=. analysis/final_metrics.jl \
+  artifacts/test_results_YYYYMMDD_HHMMSS/raw_results_YYYYMMDD_HHMMSS_analysis.csv

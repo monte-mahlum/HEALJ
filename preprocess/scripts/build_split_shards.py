@@ -3,14 +3,63 @@ from pathlib import Path
 import numpy as np
 import h5py
 import torch
+import torch.serialization as serialization
 import esm
 from Bio.PDB import PDBParser
 from Bio.SeqUtils import seq1
 from scipy.spatial import cKDTree
 import urllib.request
 
+
+"""
+To run (assuming esm1b weights are activated, and go_vocab has been built via build_go_vocab.py):
+
+python preprocess\scripts\build_split_shards.py `
+  --split_fasta preprocess/data/raw/nrPDB-GO_2019.06.18_train_sequences.fasta `
+  --annot_tsv preprocess/data/raw/nrPDB-GO_2019.06.18_annot.tsv `
+  --esm_weights preprocess/esm_weights/esm1b_t33_650M_UR50S.pt `
+  --go_vocab_json preprocess/data/processed/go_vocab_train.json `
+  --out_dir preprocess/data/processed/all_shards/train `
+  --prefix train`
+  --shard_size 256 `
+  --max_items 30000
+
+If re-running, change --prefix (e.g., train -> train2) to avoid overwriting existing shards.
+"""
+
+
 AA20 = "ACDEFGHIKLMNPQRSTVWY"
 AA_TO_IDX = {a:i for i,a in enumerate(AA20)}
+
+def collect_existing_ids(out_dir: Path, prefix: str) -> set[str]:
+    """
+    Scan existing shard HDF5 files in out_dir whose names start with prefix_
+    and collect all protein IDs already stored (grp.attrs["id"]).
+    """
+    existing = set()
+    if not out_dir.exists():
+        return existing
+
+    # Look for files like train_0000.h5, val_0003.h5, etc.
+    for h5_path in out_dir.glob("*.h5"):
+        try:
+            with h5py.File(h5_path, "r") as f:
+                # Each group is one graph; we stored pid in grp.attrs["id"]
+                for key in f.keys():
+                    grp = f[key]
+                    pid = grp.attrs.get("id", None)
+                    if pid is None:
+                        continue
+
+                    if isinstance(pid, bytes):
+                        pid = pid.decode("utf-8")
+                    existing.add(pid)
+        except Exception:
+            # Skip any problematic files
+            continue
+
+    return existing
+
 
 def read_fasta_ids(fasta_path: Path):
     ids = []
@@ -81,11 +130,19 @@ def esm_per_tok(model, alphabet, seq: str, layer: int = 33):
     batch_converter = alphabet.get_batch_converter()
     data = [("p", seq)]
     _, _, tokens = batch_converter(data)
+
+    # put tokens on the same device as the model
+    device = next(model.parameters()).device
+    tokens = tokens.to(device)
+
     with torch.no_grad():
         out = model(tokens, repr_layers=[layer], return_contacts=False)
         rep = out["representations"][layer]
+
+    # bring result back to CPU for NumPy/HDF5
     per_tok = rep[0, 1:len(seq)+1, :].cpu().contiguous()
     return per_tok.numpy().astype(np.float32)
+
 
 def parse_pdbch_id(pid: str):
     m = re.match(r"^([0-9A-Za-z]{4})[-_]?([A-Za-z0-9])$", pid)
@@ -114,12 +171,23 @@ def main():
     go_terms = vocab_obj["go_terms"]
     num_labels = len(go_terms)
 
-    esm_model, alphabet = esm.pretrained.load_model_and_alphabet_local(args.esm_weights)
+    with serialization.safe_globals([argparse.Namespace]):
+        esm_model, alphabet = esm.pretrained.load_model_and_alphabet_local(args.esm_weights)
+
     esm_model.eval()
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    esm_model = esm_model.to(device)
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     pdb_dir = Path(args.pdb_dir)
+
+    
+    # This enables reruns if the data generation was interrupted. 
+    # WARNING: change --prefix on reruns. Otherwise, existing shards will be rewritten.
+    existing_ids = collect_existing_ids(out_dir, args.prefix)
+    print(f"Found {len(existing_ids)} protein IDs already embedded in existing shards.")
 
     total = len(split_ids) if args.max_items == 0 else min(len(split_ids), args.max_items)
     num_shards = math.ceil(total / args.shard_size)
@@ -136,6 +204,10 @@ def main():
 
             n = 0
             for pid in split_ids[a:b]:
+                # Skip if already exists. Enables reruns and pulling from intersecting .fasta files
+                if pid in existing_ids:
+                    continue
+
                 gos = ann_map.get(pid, set())
                 y = np.zeros((num_labels,), dtype=np.float32)
                 for go in gos:
