@@ -2,8 +2,6 @@
 
 Julia reimplementation of the HEAL model for protein function prediction on the nrPDB-GO dataset.
 
-This README documents how to reproduce the preprocessing and training pipeline.
-
 ---
 
 ## 1. Repository layout
