@@ -87,7 +87,7 @@ struct HGT
     queries :: Vector{AbstractMatrix}   # length = heads, each K×D
     gcn_k   :: Vector{GCNLayer}
     gcn_v   :: Vector{GCNLayer}
-    fc1     :: Dense                    # (heads*D) → D
+    fc1     :: Dense                    # The internal MLP
     pool    :: AttnPool
 end
 
