@@ -199,7 +199,7 @@ function perturb_nodes(
 )
     T = eltype(H)
     X = H
-    V = randn(rng, T, size(X))                     # CPU noise
+    V = randn(rng, T, size(X))                     
     norms = sqrt.(sum(V .* V; dims = 2)) .+ T(1e-8)
     Vnorm = V ./ norms
     return X .+ ε .* (Vnorm .* sign.(X))
