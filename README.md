@@ -9,27 +9,28 @@ Julia reimplementation of the [HEAL model](https://github.com/ZhonghuiGu/HEAL/tr
 - Python (preprocessing) lives under `preprocess/`
 - Julia code lives everywhere else
 
-Key paths:
+Key paths to get started:
 
-- `preprocess/.venv/` – Python virtual environment  
-- `preprocess/scripts/` – preprocessing scripts  
-- `preprocess/esm_weights/` – ESM-1b weights  
-- `preprocess/data/raw/` – raw FASTA + annotations  
-- `preprocess/data/processed/all_shards/` – HDF5 graph shards  
-- `artifacts/` – training and test outputs (mostly gitignored)
+- `preprocess/.venv/` – Python virtual environment (gitignored; instructions below).
+- `preprocess/scripts/` – extract GO labels and mine attributed protein graphs.  
+- `preprocess/esm_weights/` – ESM-1b weights  (gitignored; instructions below).
+- `preprocess/data/raw/` – raw FASTA (sequence data) and GO annotations.
+- `preprocess/data/processed/shards/` – HDF5 graph shards  
+- `scripts/` – training and testing (heavily reliant on src/)
 
 ---
 
 ## 2. Python preprocessing
 
-All commands assume you are in the repo root.
+All commands assume you are in the repo root `~/HEALJ`.
 
-### 2.1. Create and activate Python venv
+### 2.1. Create and activate Python virtual environment (venv)
+Full requirements list can be found at `preprocess/requirements.txt` and `preprocess/requirements.lock.txt`.
 
-**Windows (PowerShell)**
+**Windows**
 
 ```powershell
-cd C:\RDI\HEALJ
+cd HEALJ
 
 python -m venv preprocess\.venv
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
@@ -37,10 +38,10 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 pip install -U pip
 pip install "numpy<2" scipy biopython torch fair-esm h5py
-macOS / Linux
+```
 
-bash
-Copy code
+**macOS/Linux**
+```bash
 cd HEALJ
 
 python3 -m venv preprocess/.venv
@@ -48,9 +49,23 @@ source preprocess/.venv/bin/activate
 
 pip install -U pip
 pip install "numpy<2" scipy biopython torch fair-esm h5py
-2.2. Download ESM-1b weights
-bash
-Copy code
+```
+### 2.2. Download ESM-1b weights
+
+**Windows **
+```powershell
+cd HEALJ
+mkdir preprocess\esm_weights
+
+curl -L -o preprocess/esm_weights/esm1b_t33_650M_UR50S.pt `
+  https://dl.fbaipublicfiles.com/fair-esm/models/esm1b_t33_650M_UR50S.pt
+
+curl -L -o preprocess/esm_weights/esm1b_t33_650M_UR50S-contact-regression.pt `
+  https://dl.fbaipublicfiles.com/fair-esm/regression/esm1b_t33_650M_UR50S-contact-regression.pt
+```
+
+**macOS/Linux**
+```bash
 cd HEALJ
 mkdir -p preprocess/esm_weights
 
@@ -59,8 +74,10 @@ curl -L -o preprocess/esm_weights/esm1b_t33_650M_UR50S.pt \
 
 curl -L -o preprocess/esm_weights/esm1b_t33_650M_UR50S-contact-regression.pt \
   https://dl.fbaipublicfiles.com/fair-esm/regression/esm1b_t33_650M_UR50S-contact-regression.pt
-2.3. Expected raw data
-Place the following under preprocess/data/raw/:
+```
+
+### 2.3. Expected raw data
+The following should be under preprocess/data/raw/ (if not, modify `preprocess/scripts/` accordingly):
 
 nrPDB-GO_2019.06.18_sequences.fasta
 
@@ -72,16 +89,34 @@ nrPDB-GO_2019.06.18_val_sequences.fasta
 
 nrPDB-GO_2019.06.18_test_sequences.fasta
 
-2.4. Build GO vocabulary
-bash
-Copy code
+### 2.4. Build GO vocabulary
+**Windows**
+```powershell
 cd HEALJ
-source preprocess/.venv/bin/activate  # or the Windows activation above
+
+
+# You may have to include:
+# Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\preprocess\.venv\Scripts\Activate.ps1
+
+python preprocess\scripts\build_go_vocab.py `
+  --annot_tsv preprocess\data\raw\nrPDB-GO_2019.06.18_annot.tsv `
+  --out_json  preprocess\data\processed\go_vocab_train.json
+```
+
+**macOS/Linux**
+```bash
+cd HEALJ
+
+source preprocess/.venv/bin/activate
 
 python preprocess/scripts/build_go_vocab.py \
   --annot_tsv preprocess/data/raw/nrPDB-GO_2019.06.18_annot.tsv \
   --out_json  preprocess/data/processed/go_vocab_train.json
-2.5. Build HDF5 shards
+
+```
+  
+### 2.5. Build HDF5 shards
 Train
 
 powershell
