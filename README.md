@@ -1,6 +1,6 @@
 # HEALJ
 
-Julia reimplementation of the [HEAL model](https://github.com/ZhonghuiGu/HEAL/tree/main) for protein function prediction on the nrPDB-GO dataset (release 2019-06-18). FOr a full exposition of this project, see the manuscript, [HEALJ.pdf](https://github.com/monte-mahlum/HEALJ/blob/main/HEALJ.pdf).
+Julia reimplementation of the [HEAL model](https://github.com/ZhonghuiGu/HEAL/tree/main) for protein function prediction on the nrPDB-GO dataset (release 2019-06-18). For a full exposition of this project, see the manuscript, [~/HEALJ.pdf](https://github.com/monte-mahlum/HEALJ/blob/main/HEALJ.pdf).
 
 ---
 
