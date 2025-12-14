@@ -217,17 +217,6 @@ julia --project=. -e 'using Pkg; Pkg.instantiate()'
 
 
 ### 3.2. Optional: dataset smoke test
-bash
-Copy code
-julia --project=. scripts/avg_graph_stats.jl
-
-
-### 3.3. Training
-First you must check that the path to your HDF5 shards is specified in `scripts/trainin.jl`. If you are using the smoke shards, you may need to write `preprocess/data/processed/smoke_shards/` wherever you see `preprocess/data/processed/shards/`. This script can be executed via simple command below and will create a folder artifacts/run_YYYYMMDD_HHMMSS/ with the following files (storing per-epoch loss data and model parameters, respectively):
-
-artifacts/run_20251211_134513/history_YYYYMMDD_HHMMSS.csv'
-artifacts/run_20251211_134513/model_YYYYMMDD_HHMMSS.jls
-
 **Windows**
 ```powershell
 cd HEALJ
@@ -243,22 +232,69 @@ julia --project=. scripts/avg_graph_stats.jl
 
 ```
 
-### 3.4. Testing and analysis
-Run the model on test data (again, you may have to modify some paths specified in the script):
+
+### 3.3. Training & Testing
+First you must check that the path to your HDF5 shards is specified in `scripts/trainin.jl`. If you are using the smoke shards, you may need to write `preprocess/data/processed/smoke_shards/` wherever you see `preprocess/data/processed/shards/`. This script can be executed via simple command below and will first creat a folder artifacts/run_YYYYMMDD_HHMMSS/ with the following files (storing per-epoch loss data and model parameters, respectively):
+
+`artifacts/run_20251211_134513/history_YYYYMMDD_HHMMSS.csv`
+`artifacts/run_20251211_134513/model_YYYYMMDD_HHMMSS.jls`
+
+Additionally, once training is completed, the resulting model is run on test data. With this, a new folder and one file are created containing rudimentary per-protein results (graph_id, graph_ref, logits, true labels).
+
+`artifacts/test_results_YYYYMMDD_HHMMSS/raw_results_YYYYMMDD_HHMMSS.jls`
 
 
+**Windows**
+```powershell
+cd HEALJ
 
-artifacts/test_results_YYYYMMDD_HHMMSS/raw_results_YYYYMMDD_HHMMSS.jls
+julia --project=. analysis/train_and_test.jl
+```
 
-Convert to per-protein metrics:
+**macOS/Linux**
+```bash
+cd HEALJ
 
-bash
-Copy code
+julia --project=. analysis/train_and_test.jl
+```
+
+### 3.4. Analysis
+
+
+Convert test results to a CSV while doing a few preliminary computations.
+
+**Windows**
+```powershell
+cd HEALJ
+
+julia --project=. analysis/analyze_test_results.jl `
+  artifacts\test_results_YYYYMMDD_HHMMSS\raw_results_YYYYMMDD_HHMMSS.jls
+
+```
+
+**macOS/Linux**
+```bash
+cd HEALJ
+
 julia --project=. analysis/analyze_test_results.jl \
   artifacts/test_results_YYYYMMDD_HHMMSS/raw_results_YYYYMMDD_HHMMSS.jls
-Compute final aggregate metrics:
+```
+  
+Compute final metrics (Appendix A of manuscript):
 
-bash
-Copy code
+**Windows**
+```powershell
+cd HEALJ
+
+julia --project=. analysis/final_metrics.jl `
+  artifacts\test_results_YYYYMMDD_HHMMSS\raw_results_YYYYMMDD_HHMMSS_analysis.csv
+
+```
+
+**macOS/Linux**
+```bash
+cd HEALJ
+
 julia --project=. analysis/final_metrics.jl \
   artifacts/test_results_YYYYMMDD_HHMMSS/raw_results_YYYYMMDD_HHMMSS_analysis.csv
+```
