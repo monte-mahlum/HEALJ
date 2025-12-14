@@ -15,8 +15,8 @@ Key paths to get started:
 - `preprocess/scripts/` – extract GO labels and mine attributed protein graphs.  
 - `preprocess/esm_weights/` – ESM-1b weights  (gitignored; instructions below).
 - `preprocess/data/raw/` – raw FASTA (sequence data) and GO annotations.
-- `preprocess/data/processed/shards/` – HDF5 graph shards  
-- `scripts/` – training and testing (heavily reliant on src/)
+- `preprocess/data/processed/shards/` – attributed graph data stored as HDF5  (gitignored, but I will upload a sample soon)
+- `scripts/` – training and testing (heavily reliant on `src/`) requires preprocesed HDF5 shards.
 
 ---
 
@@ -116,33 +116,36 @@ python preprocess/scripts/build_go_vocab.py \
 
 ```
   
-### 2.5. Build HDF5 shards
-Train
+### 2.5. Build HDF5 shards, i.e., Execute Preprocessing
+This preprocessing can be quit and rerun while skipping all proteins whose attributed graphs has already been mined. However, it is critical that the prefix is changed for every rerun, otherwise the old graphs will be rewritten.
 
-powershell
-Copy code
+- After execution, HDF5 shards exist the specified `out dir`
+
+**Windows**
+```powershell
+cd HEALJ
+
+# Training Data
 python preprocess\scripts\build_split_shards.py `
   --split_fasta   preprocess/data/raw/nrPDB-GO_2019.06.18_train_sequences.fasta `
   --annot_tsv     preprocess/data/raw/nrPDB-GO_2019.06.18_annot.tsv `
   --esm_weights   preprocess/esm_weights/esm1b_t33_650M_UR50S.pt `
   --go_vocab_json preprocess/data/processed/go_vocab_train.json `
-  --out_dir       preprocess/data/processed/all_shards/train `
+  --out_dir       preprocess/data/processed/shards/train `
   --prefix        train `
   --shard_size    256 `
-  --max_items     30000
-Validation
+  --max_items     30000    # set to zero for full preprocessing of dataset
 
-powershell
-Copy code
+# Validation Data
 python preprocess\scripts\build_split_shards.py `
   --split_fasta   preprocess/data/raw/nrPDB-GO_2019.06.18_val_sequences.fasta `
   --annot_tsv     preprocess/data/raw/nrPDB-GO_2019.06.18_annot.tsv `
   --esm_weights   preprocess/esm_weights/esm1b_t33_650M_UR50S.pt `
   --go_vocab_json preprocess/data/processed/go_vocab_train.json `
-  --out_dir       preprocess/data/processed/all_shards/validate `
+  --out_dir       preprocess/data/processed/shards/validate `
   --prefix        val `
   --shard_size    256 `
-  --max_items     3400
+  --max_items     3400     # set to zero for full preprocessing of dataset
 Test
 
 powershell
@@ -152,53 +155,98 @@ python preprocess\scripts\build_split_shards.py `
   --annot_tsv     preprocess/data/raw/nrPDB-GO_2019.06.18_annot.tsv `
   --esm_weights   preprocess/esm_weights/esm1b_t33_650M_UR50S.pt `
   --go_vocab_json preprocess/data/processed/go_vocab_train.json `
-  --out_dir       preprocess/data/processed/all_shards/test `
+  --out_dir       preprocess/data/processed/shards/test `
   --prefix        test `
   --shard_size    256 `
-  --max_items     3500
-At this point, HDF5 shards exist under:
+  --max_items     3500     # set to zero for full preprocessing of dataset
+```
 
-preprocess/data/processed/all_shards/train/
-
-preprocess/data/processed/all_shards/validate/
-
-preprocess/data/processed/all_shards/test/
-
-3. Julia / HEALJ
-3.1. Instantiate the environment
-bash
-Copy code
+**macOS/Linux**
+```bash
 cd HEALJ
+
+# Training data
+python preprocess/scripts/build_split_shards.py \
+  --split_fasta   preprocess/data/raw/nrPDB-GO_2019.06.18_train_sequences.fasta \
+  --annot_tsv     preprocess/data/raw/nrPDB-GO_2019.06.18_annot.tsv \
+  --esm_weights   preprocess/esm_weights/esm1b_t33_650M_UR50S.pt \
+  --go_vocab_json preprocess/data/processed/go_vocab_train.json \
+  --out_dir       preprocess/data/processed/shards/train \
+  --prefix        train \
+  --shard_size    256 \
+  --max_items     30000    # set to 0 for full preprocessing of dataset
+
+# Validation data
+python preprocess/scripts/build_split_shards.py \
+  --split_fasta   preprocess/data/raw/nrPDB-GO_2019.06.18_val_sequences.fasta \
+  --annot_tsv     preprocess/data/raw/nrPDB-GO_2019.06.18_annot.tsv \
+  --esm_weights   preprocess/esm_weights/esm1b_t33_650M_UR50S.pt \
+  --go_vocab_json preprocess/data/processed/go_vocab_train.json \
+  --out_dir       preprocess/data/processed/shards/validate \
+  --prefix        val \
+  --shard_size    256 \
+  --max_items     3400     # set to 0 for full preprocessing of dataset
+
+# Test data
+python preprocess/scripts/build_split_shards.py \
+  --split_fasta   preprocess/data/raw/nrPDB-GO_2019.06.18_test_sequences.fasta \
+  --annot_tsv     preprocess/data/raw/nrPDB-GO_2019.06.18_annot.tsv \
+  --esm_weights   preprocess/esm_weights/esm1b_t33_650M_UR50S.pt \
+  --go_vocab_json preprocess/data/processed/go_vocab_train.json \
+  --out_dir       preprocess/data/processed/shards/test \
+  --prefix        test \
+  --shard_size    256 \
+  --max_items     3500     # set to 0 for full preprocessing of dataset
+```
+
+## 3. Julia / HEALJ
+### 3.1. Instantiate the environment
+**Windows**
+```powershell
+cd HEALJ
+
+julia --project=. -e "using Pkg; Pkg.instantiate()"
+```
+
+**macOS/Linux**
+```bash
+cd HEALJ
+
 julia --project=. -e 'using Pkg; Pkg.instantiate()'
-3.2. Optional: dataset smoke test
+```
+
+
+### 3.2. Optional: dataset smoke test
 bash
 Copy code
 julia --project=. scripts/avg_graph_stats.jl
-(Or any other smoke script that calls HEALJ.DataLoader.make_datasets().)
 
-3.3. Training
-Example:
 
-bash
-Copy code
-julia --project=. scripts/train.jl
-Outputs go under:
+### 3.3. Training
+First you must check that the path to your HDF5 shards is specified in `scripts/trainin.jl`. If you are using the smoke shards, you may need to write `preprocess/data/processed/smoke_shards/` wherever you see `preprocess/data/processed/shards/`. This script can be executed via simple command below and will create a folder artifacts/run_YYYYMMDD_HHMMSS/ with the following files (storing per-epoch loss data and model parameters, respectively):
 
-artifacts/run_YYYYMMDD_HHMMSS/
+artifacts/run_20251211_134513/history_YYYYMMDD_HHMMSS.csv'
+artifacts/run_20251211_134513/model_YYYYMMDD_HHMMSS.jls
 
-e.g.:
+**Windows**
+```powershell
+cd HEALJ
 
-artifacts/run_20251211_134513/history_20251211_134513.csv
+julia --project=. scripts/avg_graph_stats.jl
+```
 
-artifacts/run_20251211_134513/model_20251211_134513.jls
+**macOS/Linux**
+```bash
+cd HEALJ
 
-3.4. Testing and analysis
-Run test:
+julia --project=. scripts/avg_graph_stats.jl
 
-bash
-Copy code
-julia --project=. analysis/test.jl
-This writes raw test results to:
+```
+
+### 3.4. Testing and analysis
+Run the model on test data (again, you may have to modify some paths specified in the script):
+
+
 
 artifacts/test_results_YYYYMMDD_HHMMSS/raw_results_YYYYMMDD_HHMMSS.jls
 
