@@ -1,13 +1,13 @@
 # HEALJ
 
-Julia reimplementation of the HEAL model for protein function prediction on the nrPDB-GO dataset.
+Julia reimplementation of the [HEAL model](https://github.com/ZhonghuiGu/HEAL/tree/main) for protein function prediction on the nrPDB-GO dataset (release 2019-06-18).
 
 ---
 
 ## 1. Repository layout
 
 - Python (preprocessing) lives under `preprocess/`
-- Julia code lives at the repo root
+- Julia code lives everywhere else
 
 Key paths:
 
